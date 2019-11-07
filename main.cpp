@@ -14,7 +14,7 @@ int main()
 	aqx::xdoc<aqx::xts_utf16> doc;
 	auto t = clock();
 	int err = doc.load_file(L"G:\\vs2017\\POE64_V1\\生成\\pfile.xml");
-	printf("解析文档耗时：%I64d ms\n", clock() - t);
+	printf("解析文档耗时：%d ms\n", clock() - t);
 	if (err) {
 		printf("%s\n", doc.get_error_info().c_str());
 		return 0;
