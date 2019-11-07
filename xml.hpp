@@ -4,6 +4,7 @@
 #include <list>
 #include <map>
 #include <algorithm>
+#include <fstream>
 #include <string>
 #include "tcvt.h"
 #include "encode_adaptive.h"
