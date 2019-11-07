@@ -1381,7 +1381,7 @@ namespace aqx {
 		};
 	}
 
-#ifndef __linux__
+#if defined(_WIN32) || defined(_WIN64)
 	template<typename _Ty>
 	using xdoc = aqx_internal::xdocument_t<_Ty>;
 	using xts_utf8 = aqx_internal::xts_utf8;
@@ -1390,6 +1390,7 @@ namespace aqx {
 #else
 	using xdoc = aqx_internal::xdocument_t<aqx_internal::xts_utf8>;
 #endif
+
 }
 
 #pragma warning( pop )
