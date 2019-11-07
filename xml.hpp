@@ -4,10 +4,16 @@
 #include <list>
 #include <map>
 #include <algorithm>
-#include <fstream>
 #include <string>
+#include <fstream>
+#include <string.h>
+#if defined(_WIN32) || defined(_WIN64)
 #include "tcvt.h"
 #include "encode_adaptive.h"
+#endif
+
+#pragma warning( push )  
+#pragma warning( disable:4996)  
 
 namespace aqx {
 
@@ -334,7 +340,7 @@ namespace aqx {
 		public:
 
 			//xml节点数据结构，因为结构相互依赖的原因，所以嵌套在一起
-			using Basetype = typename _Ty::_Mybase::_Alty::value_type;
+			using Basetype = typename _Ty::value_type;
 			class xnode;
 			using xtagindex_t = std::list<xnode*>;
 			using xtagindex_ref = typename xtagindex_t::iterator;
@@ -455,9 +461,9 @@ namespace aqx {
 			using Basetype = typename _XtsTy::Basetype;
 			xparser_t() {
 				// 这里忽悠一下编译器，自动根据类型选择：strstr 或 wcsstr 
-				typedef const char *(__cdecl*STRSTRFUNC)(const char *, const char *);
-				typedef const wchar_t *(__cdecl*WSTRSTRFUNC)(const wchar_t *, const wchar_t *);
-				typedef const Basetype *(__cdecl*MYSTRSTRFUNC)(const void *, const void *);
+				typedef const char *(*STRSTRFUNC)(const char *, const char *);
+				typedef const wchar_t *(*WSTRSTRFUNC)(const wchar_t *, const wchar_t *);
+				typedef const Basetype *(*MYSTRSTRFUNC)(const void *, const void *);
 				__multiec_strstr = ((sizeof(Basetype) == 1) ? 
 					((MYSTRSTRFUNC)((STRSTRFUNC)strstr)) : 
 					((MYSTRSTRFUNC)((WSTRSTRFUNC)wcsstr)));
@@ -539,7 +545,7 @@ namespace aqx {
 				auto it = res->escape_bodys.find(_Tmp);
 				if (it == res->escape_bodys.end()) {
 					errinfobuffer.reserve(_Tmp.length() * 3);
-					int n = sprintf_s((char*)errinfobuffer.data(), errinfobuffer.capacity(),
+					int n = sprintf((char*)errinfobuffer.data(), 
 						((sizeof(Basetype) == 2) ? "%ls" : "%s"),
 						_Tmp.c_str());
 					err(nbgn, 20, errinfobuffer.c_str());
@@ -660,7 +666,7 @@ namespace aqx {
 
 				if (tmp != cur->ti.name->first) {
 					errinfobuffer.reserve((tmp.length() + cur->ti.name->first.length()) * 3 + 0x20);
-					int n = sprintf_s((char*)errinfobuffer.data(), errinfobuffer.capacity(),
+					int n = sprintf((char*)errinfobuffer.data(), 
 						((sizeof(Basetype) == 2) ? "%ls 与 %ls 不一致" : "%s 与 %s 不一致"),
 						tmp.c_str(), cur->ti.name->first.c_str());
 					err(nbgn, 12, errinfobuffer.c_str());
@@ -1270,7 +1276,7 @@ namespace aqx {
 			}
 
 			using _StringTy = typename _XtsTy::strtype;
-			using _ParserTy = typename xparser_t<_XtsTy>;
+			using _ParserTy = xparser_t<_XtsTy>;
 			using Basetype = typename _XtsTy::Basetype;
 
 			using element = xelement_t<_XtsTy>;
@@ -1287,7 +1293,7 @@ namespace aqx {
 
 				if (!s) {
 					errp.information.reserve(_Filename.length() * 3);
-					sprintf_s((char*)errp.information.data(), errp.information.capacity(),
+					sprintf((char*)errp.information.data(), 
 						(sizeof(Basetype) == 2) ? "%ls" : "%s", _Filename.c_str());
 
 					errp.number = 29;
@@ -1309,42 +1315,39 @@ namespace aqx {
 					-1 错误
 				*/
 
-				
+#if defined(_WIN32) || defined(_WIN64)
 				_SrcEncode = encode_adaptive::xmlec_predict(p, s, &(errp.number), &_Off);
 				if (_SrcEncode < 0) {
 					delete p;
 					errp.information.reserve(_Filename.length() * 3);
-					sprintf_s((char*)errp.information.data(), errp.information.capacity(),
+					sprintf((char*)errp.information.data(), 
 						(sizeof(Basetype) == 2) ? "%ls" : "%s", _Filename.c_str());
 					return -1;
 				}
 
-				
 				//很遗憾的事情是，c++17删除了编码转换库，所以，只能使用操作系统的函数来完成了。
 				//虽然这个类库并不依赖c++17，但为了以后和新标准对接，所以只能自己实现跨平台的转换策略。
+				//另外一点是，linux其实对转码没有什么需求。
 				_StringTy _Text;
 				if (encode_adaptive::specifiy(p + _Off, _SrcEncode, _XtsTy::_encoding, _Text) == _nf) {
 					delete p;
 					errp.information.reserve(_Filename.length() * 3);
-					sprintf_s((char*)errp.information.data(), errp.information.capacity(),
+					sprintf((char*)errp.information.data(), 
 						(sizeof(Basetype) == 2) ? "%ls" : "%s", _Filename.c_str());
 					errp.number = 29;
 					return -1;
 				}
-
 				delete p;
-
-				
-
 				_ParserTy xp;
 				int _Result = xp.load(_Text.c_str(), (xml_size_t)s, &res);
-
-				//res.root.inner.begin = ++res.docs.begin();
+#else
+				_ParserTy xp;
+				int _Result = xp.load(p, (xml_size_t)s, &res);
+				delete p;
+#endif
 				res.root.inner.end = res.docs.end();
 				xp.get_errp(errp);
 				if (errp.number) xp.get_err_pos(errp);
-
-
 				return _Result;
 			}
 
@@ -1359,10 +1362,10 @@ namespace aqx {
 				char buf[256];
 				std::string _Result;
 				if (errp.pos != 0) {
-					sprintf_s(buf, "XML错误位于 行(%d), 列(%d):", errp.line, errp.column);
+					sprintf(buf, "XML错误位于 行(%d), 列(%d):", errp.line, errp.column);
 					_Result += buf;
 				}
-				sprintf_s(buf, xml_error_information[errp.number], errp.information.c_str());
+				sprintf(buf, xml_error_information[errp.number], errp.information.c_str());
 				_Result += buf;
 				return _Result;
 			}
@@ -1378,11 +1381,15 @@ namespace aqx {
 		};
 	}
 
+#ifndef __linux__
 	template<typename _Ty>
 	using xdoc = aqx_internal::xdocument_t<_Ty>;
 	using xts_utf8 = aqx_internal::xts_utf8;
 	using xts_utf16 = aqx_internal::xts_utf16;
 	using xts_asc = aqx_internal::xts_asc;
-
-
+#else
+	using xdoc = aqx_internal::xdocument_t<aqx_internal::xts_utf8>;
+#endif
 }
+
+#pragma warning( pop )
