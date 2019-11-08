@@ -1,4 +1,6 @@
+//xml.hpp
 #pragma once
+
 #include <setjmp.h>
 #include <set>
 #include <list>
@@ -8,12 +10,13 @@
 #include <fstream>
 #include <string.h>
 #if defined(_WIN32) || defined(_WIN64)
+//我只支持了windows中的编码转换，所以这两个文件，仅在windows下使用。
 #include "tcvt.h"
 #include "encode_adaptive.h"
 #endif
 
-#pragma warning( push )  
-#pragma warning( disable:4996)  
+#pragma warning(push)
+#pragma warning(disable:4996)
 
 namespace aqx {
 
@@ -112,6 +115,7 @@ namespace aqx {
 
 		//这两个结构用来储存一些字符串常量，实现两种字符串格式的快速引用，这两个结构绑定到三种xts类中
 		struct xmultybyte_constvalue {
+			static constexpr const char *emp = "";
 			static constexpr const char *br_tag = "<br/>";
 			static constexpr const char *crlf = "\r\n";
 			static constexpr const char *end_tag_syntax = "</";
@@ -121,6 +125,7 @@ namespace aqx {
 		};
 
 		struct xwidechar_constvalue {
+			static constexpr const wchar_t *emp = L"";
 			static constexpr const wchar_t *br_tag = L"<br/>";
 			static constexpr const wchar_t *crlf = L"\r\n";
 			static constexpr const wchar_t *end_tag_syntax = L"</";
@@ -464,8 +469,8 @@ namespace aqx {
 				typedef const char *(*STRSTRFUNC)(const char *, const char *);
 				typedef const wchar_t *(*WSTRSTRFUNC)(const wchar_t *, const wchar_t *);
 				typedef const Basetype *(*MYSTRSTRFUNC)(const void *, const void *);
-				__multiec_strstr = ((sizeof(Basetype) == 1) ? 
-					((MYSTRSTRFUNC)((STRSTRFUNC)strstr)) : 
+				__multiec_strstr = ((sizeof(Basetype) == 1) ?
+					((MYSTRSTRFUNC)((STRSTRFUNC)strstr)) :
 					((MYSTRSTRFUNC)((WSTRSTRFUNC)wcsstr)));
 			}
 
@@ -473,12 +478,17 @@ namespace aqx {
 
 			void x_escape_number()
 			{
+				//数值类型的unicode字符转义处理
+				//这里我是自己实现的字符串转换数字，
+				//因为使用C标准转换需要额外拷贝一次 & 到 ; 字符串，为了避免这个拷贝，就要临时改变转义符结束符 ; 的位置为0来给strtol去计算
+				//而在之后的dom类的load_string设计中，很可能会直接允许static const char *xxx= "...";这样的东西传入到这里进行解析。
+				//在windows中，数据段的静态常数成员是的内存页面保护是PAGE_EXECUTE_READ，不能写操作。
+				//所以我在这里简单实现了字符串 => 数字。
 				xml_size_t ebgn = xts.index - 1;
 				long long x = 0;
 				if (!xts.next_is_char('x')) {
-					xts.index -= xts.cl;
-					xts.set_flags(XML_SYNTAX::_X_NUMBER);
-					if (!xts.next_is_flags()) err(xts.index, 22);
+					// # 后面如果不是x，就按10进制的规则来处理
+					if(!(xts.s & XML_SYNTAX::_X_NUMBER)) err(xts.index, 22);
 					xts.set_flags(XML_SYNTAX::_X_NUMBER | XML_SYNTAX::_X_ESCAPEEND);
 					for (;;) {
 						x = (x * 10) + (xts.c - '0');
@@ -489,10 +499,13 @@ namespace aqx {
 				}
 				else
 				{
+					// # 后面是x，按16进制处理
 					xts.set_flags(XML_SYNTAX::_X_HEX);
 					if (!xts.next_is_flags()) err(xts.index, 23);
 					xts.set_flags(XML_SYNTAX::_X_HEX | XML_SYNTAX::_X_ESCAPEEND);
-					for (int i = 0;; i++) {
+
+					int i = 0;
+					for (;; i++) {
 						long long _Tmp;
 						switch (xts.c) {
 						case '0':case '1':case '2':case '3':case '4':case '5':case '6':case '7':case '8':case '9':
@@ -511,7 +524,15 @@ namespace aqx {
 						if (xts.c == ';')
 							break;
 					}
+
+					//由于上面的十六进制数字计算顺序是反的，所以要从最高有效位来倒转
+					long long y = 0;
+					for (int k = 0; k <= i; k++)
+						y += ((x >> (k << 2)) & 0x0F) << ((i - k) << 2);
+					x = y;
 				}
+				
+				
 				if (x < 0x20) {
 					switch (x) {
 					case '\t':case '\r':case '\n':
@@ -524,7 +545,6 @@ namespace aqx {
 					err(ebgn, 25);
 				else if (x > 0x10FFFF)
 					err(ebgn, 26);
-
 			}
 
 			void x_escape_body()
@@ -545,8 +565,8 @@ namespace aqx {
 				auto it = res->escape_bodys.find(_Tmp);
 				if (it == res->escape_bodys.end()) {
 					errinfobuffer.reserve(_Tmp.length() * 3);
-					int n = sprintf((char*)errinfobuffer.data(), 
-						((sizeof(Basetype) == 2) ? "%ls" : "%s"),
+					int n = sprintf((char*)errinfobuffer.data(),
+						((sizeof(Basetype) != 1) ? "%ls" : "%s"),
 						_Tmp.c_str());
 					err(nbgn, 20, errinfobuffer.c_str());
 				}
@@ -666,8 +686,8 @@ namespace aqx {
 
 				if (tmp != cur->ti.name->first) {
 					errinfobuffer.reserve((tmp.length() + cur->ti.name->first.length()) * 3 + 0x20);
-					int n = sprintf((char*)errinfobuffer.data(), 
-						((sizeof(Basetype) == 2) ? "%ls 与 %ls 不一致" : "%s 与 %s 不一致"),
+					int n = sprintf((char*)errinfobuffer.data(),
+						((sizeof(Basetype) != 1) ? "%ls 与 %ls 不一致" : "%s 与 %s 不一致"),
 						tmp.c_str(), cur->ti.name->first.c_str());
 					err(nbgn, 12, errinfobuffer.c_str());
 				}
@@ -896,11 +916,11 @@ namespace aqx {
 
 			}
 
-			int node_size = 0;
+			
 
 			void x_new_node() {
 
-				node_size++;
+				
 				cur->child.push_back(_Nodetype(cur, res));
 				auto it = (--cur->child.end());
 				cur = &(*it);
@@ -1204,11 +1224,6 @@ namespace aqx {
 			"未找到XML声明结束符(?>)",//32
 		};
 
-		static xml_size_t XGI_FORMAT = 1;
-		static xml_size_t XGI_COMMENT = 2;
-		static xml_size_t XGI_CDATAONLY = 4;
-		static xml_size_t XGI_TEXTONLY = 8;
-
 		template<typename _XtsTy>
 		class xelement_t {
 		public:
@@ -1221,15 +1236,24 @@ namespace aqx {
 			}
 
 			xelement_t(_Nodetype *_Val) {
-
 				_Node = _Val;
 			}
 
+			bool operator==(xelement_t &e) {
+				return e._Node == _Node;
+			}
+
+			bool operator!=(xelement_t &e) {
+				return e._Node != _Node;
+			}
+
 			_StringTy get_name() {
+				if (eof()) return _XtsTy::constval::emp;
 				return _Node->ti.name->first;
 			}
 
 			_StringTy get_attr(const _StringTy &_AttrName) {
+				if (eof()) return _XtsTy::constval::emp;
 				for (auto it = _Node->attrs.begin(); it != _Node->attrs.end(); ++it) {
 					if (*(it->name) == _AttrName)
 						return it->value->first;
@@ -1237,10 +1261,30 @@ namespace aqx {
 				return "";
 			}
 
+			_StringTy get_text(int _Flags = 0) {
+				if (eof()) return _XtsTy::constval::emp;
+				_StringTy _Tmp;
+				auto begin = _Node->inner.begin;
+				auto end = _Node->inner.end;
+				if (_Flags & 1) {
+					--begin;
+					++end;
+				}
+
+				for (auto it = begin; it != end; ++it) {
+					if (it->length() > 6 && it->at(0) == '<' && it->at(1) == '!' && it->at(2) == '-')
+						continue;
+					_Tmp += it->c_str();
+				}
+
+				return _Tmp;
+			}
+
 			_StringTy get_inner_xml() {
+				if (eof()) return _XtsTy::constval::emp;
 				_StringTy _Tmp;
 				for (auto it = _Node->inner.begin; it != _Node->inner.end; ++it) {
-					if (it->length() > 3 && 
+					if (it->length() > 3 &&
 						it->at(0) == '<' &&
 						it->at(1) == '!' &&
 						it->at(2) == '-')
@@ -1260,6 +1304,7 @@ namespace aqx {
 			}
 
 		private:
+			friend class xdocument_t<_XtsTy>;
 			_Nodetype *_Node;
 		};
 
@@ -1268,7 +1313,7 @@ namespace aqx {
 		class xdocument_t {
 		public:
 			xdocument_t() {
-
+				nodepath_array.reserve(0x10);
 			}
 
 			~xdocument_t() {
@@ -1278,8 +1323,11 @@ namespace aqx {
 			using _StringTy = typename _XtsTy::strtype;
 			using _ParserTy = xparser_t<_XtsTy>;
 			using Basetype = typename _XtsTy::Basetype;
+			using _ResourceTy = xresource_t<_StringTy>;
+			using _TagIndexTy = typename _ResourceTy::xtagindex_t;
 
 			using element = xelement_t<_XtsTy>;
+			using _Nodetype = typename element::_Nodetype;
 
 			int load_file(const _StringTy &_Filename) {
 				errp.pos = 0;
@@ -1293,8 +1341,8 @@ namespace aqx {
 
 				if (!s) {
 					errp.information.reserve(_Filename.length() * 3);
-					sprintf((char*)errp.information.data(), 
-						(sizeof(Basetype) == 2) ? "%ls" : "%s", _Filename.c_str());
+					sprintf((char*)errp.information.data(),
+						(sizeof(Basetype) != 1) ? "%ls" : "%s", _Filename.c_str());
 
 					errp.number = 29;
 					errp.pos = 0;
@@ -1320,8 +1368,8 @@ namespace aqx {
 				if (_SrcEncode < 0) {
 					delete p;
 					errp.information.reserve(_Filename.length() * 3);
-					sprintf((char*)errp.information.data(), 
-						(sizeof(Basetype) == 2) ? "%ls" : "%s", _Filename.c_str());
+					sprintf((char*)errp.information.data(),
+						(sizeof(Basetype) != 1) ? "%ls" : "%s", _Filename.c_str());
 					return -1;
 				}
 
@@ -1332,8 +1380,8 @@ namespace aqx {
 				if (encode_adaptive::specifiy(p + _Off, _SrcEncode, _XtsTy::_encoding, _Text) == _nf) {
 					delete p;
 					errp.information.reserve(_Filename.length() * 3);
-					sprintf((char*)errp.information.data(), 
-						(sizeof(Basetype) == 2) ? "%ls" : "%s", _Filename.c_str());
+					sprintf((char*)errp.information.data(),
+						(sizeof(Basetype) != 1) ? "%ls" : "%s", _Filename.c_str());
 					errp.number = 29;
 					return -1;
 				}
@@ -1352,12 +1400,40 @@ namespace aqx {
 			}
 
 			element get_element(const _StringTy &_TagName) {
-				auto it = res.tags.find(_TagName);
-				if (it != res.tags.end())
-					return *(it->second.begin());
-				return nullptr;
+				size_t _Off = 0;
+				size_t _Pos;
+				Basetype *_Ptr = (Basetype *)_TagName.c_str();
+				nodepath_array.clear();
+				auto i = res.tags.end();
+				for (;;) {
+					_Pos = _TagName.find('/', _Off);
+					if (_Pos == _nf)
+						break;
+					_Ptr[_Pos] = 0;
+					i = res.tags.find(_Ptr + _Off);
+					_Ptr[_Pos] = '/';
+					if (i == res.tags.end()) return nullptr;
+					nodepath_array.push_back(&(i->second));
+					_Off = _Pos + 1;
+				}
+				i = res.tags.find(_Ptr + _Off);
+				if (i == res.tags.end()) return nullptr;
+				if (!nodepath_array.size()) return *(i->second.begin());
+				nodepath_array.push_back(&(i->second));
+				return recursive_nodepath(nullptr, 0);
 			}
 
+			element get_element(element &_Parent, const _StringTy &_TagName) {
+				auto fit = res.tags.find(_TagName);
+				if (fit != res.tags.end()) {
+					for (auto it = fit->second.begin(); it != fit->second.end(); ++it) {
+						if (_Parent->_Node == it->_Node)
+							return it;
+					}
+				}
+				return nullptr;
+			}
+			
 			std::string get_error_info() {
 				char buf[256];
 				std::string _Result;
@@ -1374,10 +1450,39 @@ namespace aqx {
 				return &(res.root);
 			}
 
+			element end() {
+				
+				return nullptr;
+			}
+
 		private:
-			xresource_t<_StringTy> res;
+			_Nodetype *recursive_nodepath(_Nodetype *_Parent, size_t i) {
+				_TagIndexTy *pti = nodepath_array[i];
+				auto _next = i + 1;
+				if (_next == nodepath_array.size())
+				{
+					for (auto it = pti->begin(); it != pti->end(); ++it) {
+						if (!i || (*it)->parent == _Parent)
+							return *it;
+					}
+				}
+				else
+				{
+					for (auto it = pti->begin(); it != pti->end(); ++it) {
+						if (!i || (*it)->parent == _Parent) {
+							_Nodetype *p = recursive_nodepath(*it, _next);
+							if (p) return p;
+						}
+					}
+				}
+				return (_Nodetype *)nullptr;
+			}
+
+		private:
+			_ResourceTy res;
 			xerrorpos errp;
 			int _SrcEncode;
+			std::vector<_TagIndexTy*> nodepath_array;
 		};
 	}
 
@@ -1393,4 +1498,5 @@ namespace aqx {
 
 }
 
-#pragma warning( pop )
+
+#pragma warning(pop)
